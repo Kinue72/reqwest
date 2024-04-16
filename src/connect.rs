@@ -212,6 +212,14 @@ impl Connector {
             ProxyScheme::Socks5 {
                 remote_dns: true, ..
             } => socks::DnsResolve::Proxy,
+
+            ProxyScheme::Socks4 {
+                remote_dns: false, ..
+            } => socks::DnsResolve::Local,
+            ProxyScheme::Socks4 {
+                remote_dns: true, ..
+            } => socks::DnsResolve::Proxy,
+
             ProxyScheme::Http { .. } | ProxyScheme::Https { .. } => {
                 unreachable!("connect_socks is only called for socks proxies");
             }
@@ -367,7 +375,7 @@ impl Connector {
             ProxyScheme::Http { host, auth } => (into_uri(Scheme::HTTP, host), auth),
             ProxyScheme::Https { host, auth } => (into_uri(Scheme::HTTPS, host), auth),
             #[cfg(feature = "socks")]
-            ProxyScheme::Socks5 { .. } => return self.connect_socks(dst, proxy_scheme).await,
+            ProxyScheme::Socks5 { .. } | ProxyScheme::Socks4 { .. } => return self.connect_socks(dst, proxy_scheme).await,
         };
 
         #[cfg(feature = "__tls")]
@@ -1031,7 +1039,7 @@ mod socks {
 
     use http::Uri;
     use tokio::net::TcpStream;
-    use tokio_socks::tcp::Socks5Stream;
+    use tokio_socks::tcp::{Socks4Stream, Socks5Stream};
 
     use super::{BoxError, Scheme};
     use crate::proxy::ProxyScheme;
@@ -1064,28 +1072,34 @@ mod socks {
             }
         }
 
-        let (socket_addr, auth) = match proxy {
-            ProxyScheme::Socks5 { addr, auth, .. } => (addr, auth),
+        match proxy {
+            ProxyScheme::Socks5 { addr, auth, .. } => {
+                let stream = if let Some((username, password)) = auth {
+                    Socks5Stream::connect_with_password(
+                        addr,
+                        (host.as_str(), port),
+                        &username,
+                        &password,
+                    )
+                        .await
+                        .map_err(|e| format!("socks5 connect error: {e}"))?
+                } else {
+                    Socks5Stream::connect(addr, (host.as_str(), port))
+                        .await
+                        .map_err(|e| format!("socks5 connect error: {e}"))?
+                };
+
+                Ok(stream.into_inner())
+            },
+            ProxyScheme::Socks4 { addr, ..} => {
+                let stream = Socks4Stream::connect(addr, (host.as_str(), port))
+                    .await
+                    .map_err(|e| format!("socks4 connect error: {e}"))?;
+
+                Ok(stream.into_inner())
+            },
             _ => unreachable!(),
-        };
-
-        // Get a Tokio TcpStream
-        let stream = if let Some((username, password)) = auth {
-            Socks5Stream::connect_with_password(
-                socket_addr,
-                (host.as_str(), port),
-                &username,
-                &password,
-            )
-            .await
-            .map_err(|e| format!("socks connect error: {e}"))?
-        } else {
-            Socks5Stream::connect(socket_addr, (host.as_str(), port))
-                .await
-                .map_err(|e| format!("socks connect error: {e}"))?
-        };
-
-        Ok(stream.into_inner())
+        }
     }
 }
 

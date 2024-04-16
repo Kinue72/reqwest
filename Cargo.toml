@@ -150,7 +150,7 @@ async-compression = { version = "0.4.0", default-features = false, features = ["
 tokio-util = { version = "0.7.1", default-features = false, features = ["codec", "io"], optional = true }
 
 ## socks
-tokio-socks = { version = "0.5.1", optional = true }
+tokio-socks = { git = "https://github.com/Kinue72/tokio-socks", optional = true }
 
 ## hickory-dns
 hickory-resolver = { version = "0.24", optional = true, features = ["tokio-runtime"] }
